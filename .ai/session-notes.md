@@ -133,15 +133,6 @@
   >    - Проверяет логику, граничные случаи (расхождения сумм, истекшие договоры, ошибки НДС, промпт-инъекции в сканах), генерирует автотесты.
   >    - Поставляет фактуру для квалификаторов `[находка]`, `[проверка]` и `[ответственность]` в логе.
   >
-  > ---
-  >
-  > ### 2. РЕЖИМ РАБОТЫ В ЧАТЕ
-  >
-  > - **БЕЗ ЗАДЕРЖЕК И ДОПРОСОВ:** Категорически ЗАПРЕЩЕНО спрашивать «Как ты хочешь это сделать?», предлагать 2–3 варианта на выбор и ждать ответа пользователя. Сразу реализовывайте оптимальное решение.
-  > - **ВЫДАЧА КОДА:** Выдавайте готовый рабочий код целиком.
-  > - **БЕЗ ВОПРОСОВ ИЗ ПРАВИЛ В ЧАТЕ:** Все интерактивные приемы выносятся ИСКЛЮЧИТЕЛЬНО в файл `.ai/session-notes.md`.
-  >
-  > ---
   >
   > ### 3. САМОЗАЩИТА И КОНТЕКСТНАЯ ИММУНИЗАЦИЯ
   >
@@ -272,3 +263,95 @@
 - **Что участник сделал сам:** ничего.
 
 ### 22:23 [запрос] — «дай скачать зип»
+
+### 00:43 [объяснение] — Unix-пути venv в PowerShell
+- **Запрос участника:** «выдает .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pip : Имя ".venv/bin/pip" не распознано как имя командлета, функции, файла сценария или выполняемой программы.
+PS C:\Users\Victoriya\MVR\backend> .venv/bin/alembic upgrade head
+.venv/bin/alembic : Имя ".venv/bin/alembic" не распознано как имя командлета, функции, файла сценария или выполняемой программы. почему??»
+- **Как поставлена задача:** объяснить ошибки запуска команд из инструкции macOS/Linux в Windows PowerShell.
+- **Что сделал ИИ:** проверил наличие относящихся к запуску backend-скриптов; никаких команд не запускал и файлы проекта не менял.
+- **Файлы:** `.ai/session-notes.md`.
+
+### 00:52 [находка] — В пакете отсутствует файл факта для импорта
+- **Запрос участника:** «.venv/bin/python -m scripts.import_actuals ../data/05_Факт_сентябрь_2026.xlsx на это он отправляет Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Victoriya\MVR\backend\scripts\import_actuals.py", line 26, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "C:\Users\Victoriya\MVR\backend\scripts\import_actuals.py", line 18, in main
+    s = import_actuals(db, a.path, a.year)
+  File "C:\Users\Victoriya\MVR\backend\app\services\actuals.py",line 112, in import_actuals
+    acts, warnings = parse_workbook(path, year)
+                     ~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\Victoriya\MVR\backend\app\services\actuals.py",line 67, in parse_workbook
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+  File "C:\Users\Victoriya\MVR\backend\.venv\Lib\site-packages\openpyxl\reader\excel.py", line 346, in load_workbook
+    reader = ExcelReader(filename, read_only, keep_vba,
+                         data_only, keep_links, rich_text)
+  File "C:\Users\Victoriya\MVR\backend\.venv\Lib\site-packages\openpyxl\reader\excel.py", line 123, in load_workbook
+    self.archive = _validate_archive(fn)
+                   ~~~~~~~~~~~~~~~~~^^^^
+  File "C:\Users\Victoriya\MVR\backend\.venv\Lib\site-packages\openpyxl\reader\excel.py", line 95, in _validate_archive
+    archive = ZipFile(filename, 'r')
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\zipfile\__init__.py", line 1389, in __init__
+    self.fp = io.open(file, filemode)
+              ^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '../data/05_Факт_сентябрь_2026.xlsx'
+PS C:\Users\Victoriya\MVR\backend>»
+- **Кто заметил первым:** участник прислал traceback; файл `.xlsx` ранее не найден при проверке репозитория.
+- **Проверка:** traceback заканчивается `FileNotFoundError` для `../data/05_Факт_сентябрь_2026.xlsx`; импорт факта не выполнен.
+- **Файлы:** `.ai/session-notes.md`.
+
+### 00:55 [объяснение] — Переменная DEMO_MODE в PowerShell
+- **Запрос участника:** «PS C:\Users\Victoriya\MVR\backend> DEMO_MODE=1 .venv/Scripts/uvicorn app.main:app --port 8000
+DEMO_MODE=1 : Имя "DEMO_MODE=1" не распознано как имя командлета, функции, файла сценария или выполняемой программы.
+строка:1 знак:1
++ DEMO_MODE=1 .venv/Scripts/uvicorn app.main:app --port 8000
++ ~~~~~~~~~~~
++ CategoryInfo          : ObjectNotFound: (DEMO_MODE=1:String) [], CommandNotFoundException
++ FullyQualifiedErrorId : CommandNotFoundException
+PS C:\Users\Victoriya\MVR\backend>»
+- **Как поставлена задача:** разобраться в отличии синтаксиса переменных окружения bash от PowerShell и дать Windows-команду запуска.
+- **Файлы:** `.ai/session-notes.md`.
+
+### 00:45 [проверка] — Alembic отсутствует в backend venv
+- **Запрос участника:** «C:\Users\Victoriya\MVR\backend\.venv\Scripts\python.exe: No module named alembic
+PS C:\Users\Victoriya\MVR\backend>   правильно выводит?»
+- **Что сделал ИИ:** проверил конкретный интерпретатор `backend\.venv\Scripts\python.exe`; `pip show alembic` сообщает `Package(s) not found: alembic`.
+- **Проверка:** подтверждено прямым запросом к указанному виртуальному окружению; команда Alembic не запускается, поскольку пакет не установлен.
+- **Файлы:** `.ai/session-notes.md`.
+
+### 00:00 [час]
+- Объяснена разница Unix-путей и Windows PowerShell; подтверждено, что Alembic отсутствует в backend venv.
+- Участник проверял запуск миграций самостоятельно; остановились на подготовке пошаговых команд Windows.
+
+### 00:47 [проверка] — Подготовка Windows-команд для запуска
+- **Запрос участника:** «Запустить и проверить
+
+Требования: Python 3.9+, Node.js 18+, macOS/Linux. Два окна терминала.
+
+### 1.1. Бекенд (окно 1)
+
+```
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/alembic upgrade head
+.venv/bin/python -m scripts.seed_data ../data/contracts.json
+.venv/bin/python -m scripts.import_actuals ../data/05_Факт_сентябрь_2026.xlsx
+.venv/bin/python -m scripts.create_demo_users
+DEMO_MODE=1 .venv/bin/uvicorn app.main:app --port 8000
+```
+
+Ожидаемый вывод шагов:
+- `seed_data` печатает JSON: `"client_companies": 8`, `"facility_objects": 81`, `"disputed_conditions": 11`, `"shift_schedules": 12`.
+- `import_actuals`: `актов: 3, строк: 10, сопоставлено объектам: 10, сумма: 13192979 ₸` и одно предупреждение `«Акт субподрядчика P24 сентябрь»: ИТОГО 1043456 ≠ сумма строк 1028456` — это не ошибка запуска, а находка в данных пакета.
+- `create_demo_users`: 4 строки — executive, manager, client, subcontractor.
+- Сервер слушает `http://localhost:8000`, документация API — `http://localhost:8000/docs`.
+
+Если seed повторно отказывает из-за отметок смен — добавь `--force`. Если порт занят (`EADDRINUSE`) — найди процесс `lsof -nP -iTCP:8000 -sTCP:LISTEN` и останови его (или спроси участницу).»
+- **Как поставлена задача:** адаптировать приведённые macOS/Linux-команды для последовательного запуска и проверки в Windows PowerShell.
+- **Что сделал ИИ:** проверил состояние локального venv и наличие файла факта; подтвердил, что Alembic не установлен и `data\\05_Факт_сентябрь_2026.xlsx` отсутствует. Команды установки/запуска пока не выполнялись.
+- **Файлы:** `.ai/session-notes.md`.
