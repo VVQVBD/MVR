@@ -1,110 +1,87 @@
+import type { ClientCompany, Dispute, FacilityObject, Me, Role, Schedule, Severity, Source, Subcontractor, Token } from "./types";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export type Severity = "low" | "medium" | "high" | "critical";
-
-export interface Source {
-  id: number;
-  file: string;
-  page?: number | null;
-  pages?: number[] | null;
-  sheet?: string | null;
-  row?: number | null;
-  quote?: string | null;
-  note?: string | null;
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
 }
 
-export interface Dispute {
-  id: string;
-  client_name?: string | null;
-  topic: string;
-  severity: Severity;
-  issue: string;
-  ask?: string | null;
-  status: string;
-  sources: Source[];
+async function request<T>(path: string, token: string | null, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError(0, `Сервер API недоступен (${API_URL})`);
+  }
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body: unknown = await response.json();
+      if (body && typeof body === "object" && "detail" in body) {
+        const d = (body as { detail: unknown }).detail;
+        detail = typeof d === "string" ? d : JSON.stringify(d);
+      }
+    } catch {
+      /* тело не JSON — оставляем statusText */
+    }
+    throw new ApiError(response.status, detail);
+  }
+  return (await response.json()) as T;
 }
 
-export interface Client {
-  id: number;
-  code: string;
-  name: string;
+export const api = {
+  demoToken: (role: Role) =>
+    request<Token>("/auth/demo-token", null, { method: "POST", body: JSON.stringify({ role }) }),
+  me: (token: string) => request<Me>("/auth/me", token),
+  discrepancies: (token: string, filters: { severity?: Severity; clientId?: number }) => {
+    const q = new URLSearchParams();
+    if (filters.severity) q.set("severity", filters.severity);
+    if (filters.clientId) q.set("client_id", String(filters.clientId));
+    const qs = q.toString();
+    return request<Dispute[]>(`/api/v1/contracts/discrepancies${qs ? `?${qs}` : ""}`, token);
+  },
+  clients: (token: string) => request<ClientCompany[]>("/clients", token),
+  subcontractors: (token: string) => request<Subcontractor[]>("/subcontractors", token),
+  objects: (token: string) => request<FacilityObject[]>("/objects", token),
+  schedules: (token: string) => request<Schedule[]>("/schedules", token),
+};
+
+// ---------- форматирование ----------
+const kzt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
+const area = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
+
+export function formatKzt(v: string | null | undefined): string {
+  return v == null ? "—" : `${kzt.format(Number(v))} ₸`;
 }
 
-export type Role = "executive" | "manager" | "subcontractor" | "client";
-
-export interface Me {
-  id: number;
-  email: string;
-  role: Role;
+export function formatArea(v: string | null | undefined): string {
+  return v == null ? "—" : `${area.format(Number(v))} м²`;
 }
 
-export interface Schedule {
-  id: number;
-  facility_object_id: number;
-  period_month: string;
-  operators_count?: number | null;
-  shift_start?: string | null;
-  shift_end?: string | null;
-  days_pattern?: string | null;
-}
-
-export function formatShift(s: Schedule): string {
-  const parts = [];
-  if (s.operators_count) parts.push(`${s.operators_count} ОПУ`);
-  if (s.shift_start && s.shift_end) parts.push(`${s.shift_start.slice(0, 5)}–${s.shift_end.slice(0, 5)}`);
-  if (s.days_pattern) parts.push(s.days_pattern);
-  return parts.length ? parts.join(" ") : "часы не указаны";
-}
-
-// Для субподрядчика API не отдаёт цены, НДС, договор и клиента — эти поля отсутствуют.
-export interface FacilityObject {
-  id: number;
-  client_company_id?: number;
-  code: string;
-  name: string;
-  city: string;
-  address?: string | null;
-  area_m2?: string | null;
-  services?: string | null;
-  monthly_tariff?: string | null;
-  vat_note?: string | null;
-  subcontractor?: { id: number; code?: string | null; name: string } | null;
-}
-
-export interface Finding {
-  kind: string;
-  severity: Severity;
-  client_code: string;
-  contract_number?: string | null;
-  message: string;
-  difference?: string | null;
-}
-
-export async function login(email: string, password: string): Promise<string> {
-  const body = new URLSearchParams({ username: email, password });
-  const r = await fetch(`${API_URL}/auth/token`, { method: "POST", body });
-  if (!r.ok) throw new Error("Неверный логин или пароль");
-  return (await r.json()).access_token;
-}
-
-export async function get<T>(path: string, token: string): Promise<T> {
-  const r = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-  if (r.status === 401) throw new Error("unauthorized");
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-  return r.json();
-}
-
-export function formatSource(s: Source): string {
-  const parts = [s.file];
-  if (s.sheet) parts.push(`лист «${s.sheet}»`);
+/** «стр. 2» / «стр. 1, 3, 4» / «лист «Объекты», строка 3». */
+export function formatSourceLocation(s: Source): string {
+  const parts: string[] = [];
   if (s.page != null) parts.push(`стр. ${s.page}`);
   if (s.pages?.length) parts.push(`стр. ${s.pages.join(", ")}`);
+  if (s.sheet) parts.push(`лист «${s.sheet}»`);
   if (s.row != null) parts.push(`строка ${s.row}`);
   return parts.join(", ");
 }
 
-const kzt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
-
-export function formatMoney(v?: string | null): string {
-  return v == null ? "—" : `${kzt.format(Number(v))} ₸`;
+export function sourceKind(file: string): "pdf" | "xlsx" | "json" | "other" {
+  const ext = file.split(".").pop()?.toLowerCase();
+  if (ext === "pdf") return "pdf";
+  if (ext === "xlsx" || ext === "xls") return "xlsx";
+  if (ext === "json") return "json";
+  return "other";
 }

@@ -98,12 +98,28 @@ class AddendumOut(ORM):
     number: str
     signed_at: Optional[dt.date] = None
     effective_from: Optional[dt.date] = None
+    extends_to: Optional[dt.date] = None
     summary: Optional[str] = None
     vat_basis: VatBasis
     vat_rate: Optional[Decimal] = None
     stated_monthly_total: Optional[Decimal] = None
     injection_flags: Optional[List[str]] = None
     sources: List[SourceOut] = []
+
+
+class ExtensionIn(BaseModel):
+    """Отметка о продлении договора допсоглашением."""
+
+    number: str = Field(min_length=1, max_length=50, description="Номер ДС, напр. «ДС №3»")
+    signed_at: dt.date
+    extends_to: dt.date = Field(description="До какой даты продлён договор")
+    summary: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _dates(self):
+        if self.extends_to <= self.signed_at:
+            raise ValueError("extends_to должен быть позже даты подписания")
+        return self
 
 
 class ContractOut(ORM):
@@ -258,6 +274,7 @@ class ShiftReportOut(ORM, ShiftReportCreate):
 class BillingActLineIn(BaseModel):
     facility_object_id: Optional[int] = None
     description: str
+    hours: Optional[Decimal] = Field(None, ge=0)
     amount_net: Decimal
     note: Optional[str] = None
 
@@ -270,6 +287,8 @@ class BillingActCreate(BaseModel):
     kind: ActKind
     number: Optional[str] = None
     period_month: dt.date
+    service_from: Optional[dt.date] = Field(None, description="Первый день услуг; пусто — с 1-го числа")
+    service_to: Optional[dt.date] = Field(None, description="Последний день услуг; пусто — до конца месяца")
     client_company_id: Optional[int] = None
     contract_id: Optional[int] = None
     subcontractor_id: Optional[int] = None
@@ -281,6 +300,11 @@ class BillingActCreate(BaseModel):
 
     @model_validator(mode="after")
     def _party(self):
+        for d in (self.service_from, self.service_to):
+            if d is not None and (d.year, d.month) != (self.period_month.year, self.period_month.month):
+                raise ValueError("Дни услуг должны быть внутри месяца period_month")
+        if self.service_from and self.service_to and self.service_from > self.service_to:
+            raise ValueError("service_from позже service_to")
         if self.kind == "client_avr" and self.client_company_id is None:
             raise ValueError("АВР клиенту требует client_company_id")
         if self.kind == "subcontractor_act" and self.subcontractor_id is None:
@@ -293,10 +317,14 @@ class BillingActOut(ORM):
     kind: ActKind
     number: Optional[str] = None
     period_month: dt.date
+    service_from: Optional[dt.date] = None
+    service_to: Optional[dt.date] = None
     client_company_id: Optional[int] = None
     contract_id: Optional[int] = None
     subcontractor_id: Optional[int] = None
     status: ActStatus
+    issued_at: Optional[dt.date] = None
+    stated_total: Optional[Decimal] = None
     amount_net: Optional[Decimal] = None
     vat_rate: Optional[Decimal] = None
     vat_amount: Optional[Decimal] = None
@@ -317,6 +345,9 @@ class Finding(BaseModel):
         "vat_rate",
         "vat_unspecified",
         "prompt_injection",
+        "work_after_expiry",
+        "unverified_amount",
+        "act_mismatch",
     ]
     severity: FindingSeverity
     client_code: str

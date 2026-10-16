@@ -20,6 +20,7 @@ from app.schemas import (
     ShiftScheduleOut,
 )
 from app.security import any_user, require_roles, staff
+from app.services import checks, costing
 
 router = APIRouter(tags=["operations"])
 staff_or_subcontractor = require_roles("executive", "manager", "subcontractor")
@@ -99,6 +100,75 @@ def create_report(body: ShiftReportCreate, user: m.User = Depends(staff_or_subco
 
 
 # ---------- акты ----------
+def _block_unconfirmed_total(db: Session, act: m.BillingAct) -> None:
+    """АВР нельзя выставить на итог договора/ДС, который не сходится с суммой строк (Q-11 Модена)."""
+    contract = db.scalar(
+        select(m.Contract)
+        .where(m.Contract.id == act.contract_id)
+        .options(
+            selectinload(m.Contract.facility_objects),
+            selectinload(m.Contract.addenda).selectinload(m.ContractAddendum.facility_objects),
+            selectinload(m.Contract.client_company),
+        )
+    )
+    if contract is None:
+        raise HTTPException(422, detail="Договор не найден")
+    for f in checks.check_arithmetic(contract, contract.client_company.code):
+        if f.kind == "arithmetic" and f.actual is not None and abs(act.amount_net - f.actual) < 1:
+            raise HTTPException(
+                409,
+                detail=(
+                    f"Итог {f.actual} ₸ по {contract.number} не подтверждён: сумма строк {f.expected} ₸, "
+                    f"разница {f.difference} ₸. Выставьте АВР по строкам или дождитесь исправления итога."
+                ),
+            )
+
+
+def _month_end(d: dt.date) -> dt.date:
+    return (d.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+
+
+def _block_expired_contract(db: Session, act: m.BillingAct) -> None:
+    """АВР только за дни, когда договор действовал (Q-01 Спортлайн, Q-02 Жұлдыз Банк).
+
+    Договор без автопролонгации, истёкший до начала услуг, — АВР запрещён целиком.
+    Истекает внутри периода — разрешены дни по дату окончания включительно, остальные — 409.
+    """
+    contract = db.scalar(
+        select(m.Contract)
+        .where(m.Contract.id == act.contract_id)
+        .options(selectinload(m.Contract.addenda), selectinload(m.Contract.facility_objects))
+    )
+    first = act.service_from or act.period_month
+    last = act.service_to or _month_end(act.period_month)
+    if checks.contract_status(contract, last) != "expired":
+        return
+    end = checks.effective_valid_to(contract)
+    if end < first:
+        raise HTTPException(
+            409,
+            detail=(
+                f"Договор {contract.number} истёк {end}, продление только допсоглашением — АВР за "
+                f"{act.period_month:%Y-%m} не выставляется. Внесите отметку о продлении: "
+                f"POST /contracts/{contract.id}/extensions."
+            ),
+        )
+    days, month_days = (end - first).days + 1, _month_end(act.period_month).day
+    monthly = Decimal(0)
+    for o in contract.facility_objects:
+        if o.monthly_tariff is not None:
+            net, _ = costing.net_tariff(o.monthly_tariff, o.vat_basis, o.vat_rate, end)
+            monthly += net or 0
+    hint = f" По тарифам договора за {days} дн. из {month_days}: {costing.money(monthly * days / month_days)} ₸ без НДС." if monthly else ""
+    raise HTTPException(
+        409,
+        detail=(
+            f"Договор {contract.number} действует по {end}, дни после этой даты не оплачиваются. "
+            f"Выставьте АВР за {first:%d.%m}–{end:%d.%m.%Y} (service_from/service_to).{hint}"
+        ),
+    )
+
+
 def _totals(act: m.BillingAct) -> None:
     net = sum((l.amount_net for l in act.lines), Decimal("0"))
     act.amount_net = net.quantize(Decimal("0.01"))
@@ -132,6 +202,9 @@ def create_act(body: BillingActCreate, db: Session = Depends(get_db)):
     for line in body.lines:
         act.lines.append(m.BillingActLine(**line.model_dump()))
     _totals(act)
+    if act.kind == "client_avr" and act.contract_id is not None:
+        _block_unconfirmed_total(db, act)
+        _block_expired_contract(db, act)
     db.add(act)
     _commit(db)
     return act

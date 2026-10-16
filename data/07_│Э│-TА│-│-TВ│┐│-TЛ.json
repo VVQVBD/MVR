@@ -1,0 +1,25 @@
+{
+  "vat_rate": {
+    "до 2025-12-31": 0.12,
+    "с 2026-01-01": 0.16
+  },
+  "subcontractor_fee_share_of_budget": 0.101,
+  "subcontractor_admin_share_of_budget": 0.01,
+  "ic_margin_share_of_price": 0.15,
+  "platform_gross_up": 0.06,
+  "operator_rates_tg_per_hour": {
+    "ОПУ день": 1250,
+    "ОПУ ночь (22:00–07:00)": 1450,
+    "Администратор объекта": 1700,
+    "ОПУ полотёр": 1400,
+    "ОПУ прилегающая территория": 1300,
+    "Тракторист": 2300
+  },
+  "max_hours_per_24h": 14,
+  "min_rest_after_night_shift_hours": 8,
+  "night_shift_definition": "смена, захватывающая период с 00:00 до 05:00",
+  "max_hours_per_week": 72,
+  "min_gap_same_building_min": 0,
+  "min_gap_other_building_min": 45,
+  "subcontractor_act_due_day": 3
+}

@@ -67,9 +67,30 @@ def db_session(tmp_path, raw):
     engine.dispose()
 
 
+ACTUALS = DATA.parent / "05_Факт_сентябрь_2026.xlsx"
+
+
+@pytest.fixture()
+def with_acts(db_session):
+    from app.services.actuals import import_actuals
+
+    return import_actuals(db_session, ACTUALS, 2026)
+
+
 @pytest.fixture()
 def api(db_session):
+    from sqlalchemy.pool import NullPool
+
+    from app.db_async import get_async_db, make_async_sessionmaker
+
+    async_maker = make_async_sessionmaker(str(db_session.get_bind().url), poolclass=NullPool)
+
+    async def _async_db():
+        async with async_maker() as s:
+            yield s
+
     app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_async_db] = _async_db
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

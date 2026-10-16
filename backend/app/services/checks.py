@@ -129,9 +129,15 @@ def check_arithmetic(contract: Contract, client_code: str) -> List[Finding]:
     return findings
 
 
+def effective_valid_to(contract: Contract) -> Optional[dt.date]:
+    """Срок договора с учётом отметок о продлении в допсоглашениях."""
+    ends = [d for d in [contract.valid_to] + [a.extends_to for a in contract.addenda] if d is not None]
+    return max(ends) if ends else None
+
+
 def current_term_end(contract: Contract, as_of: dt.date) -> Optional[dt.date]:
-    """Конец текущего срока с учётом ежегодной автопролонгации; None — срок не указан."""
-    end = contract.valid_to
+    """Конец текущего срока с учётом продлений и ежегодной автопролонгации; None — срок не указан."""
+    end = effective_valid_to(contract)
     if end is None:
         return None
     if contract.renewal == "auto_annual":
@@ -141,17 +147,18 @@ def current_term_end(contract: Contract, as_of: dt.date) -> Optional[dt.date]:
 
 
 def contract_status(contract: Contract, as_of: dt.date) -> str:
-    if contract.valid_to is None:
+    end = effective_valid_to(contract)
+    if end is None:
         return "unknown"
-    if contract.valid_to < as_of:
+    if end < as_of:
         return "auto_renewed" if contract.renewal == "auto_annual" else "expired"
-    if contract.renewal != "auto_annual" and (contract.valid_to - as_of).days <= settings.expiring_days:
+    if contract.renewal != "auto_annual" and (end - as_of).days <= settings.expiring_days:
         return "expiring"
     return "active"
 
 
 def check_expired(contract: Contract, client_code: str, as_of: dt.date) -> List[Finding]:
-    valid_to = contract.valid_to
+    valid_to = effective_valid_to(contract)
     if valid_to is None:
         return []
     has_objects = bool(contract.facility_objects)

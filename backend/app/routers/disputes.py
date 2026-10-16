@@ -11,8 +11,9 @@ from app import models as m
 from app.db import get_db
 from app.schemas import DisputeOut, DisputeUpdate, Finding, ImportSummary
 from app.security import any_user, executive, staff
-from app.services import checks
+from app.services import actuals, checks
 from app.services import contracts_v1
+from app.services.norms import NormsError, load_norms
 from app.services.importer import ImportBlocked, import_contracts
 
 router = APIRouter(tags=["disputes"])
@@ -82,7 +83,24 @@ def run_checks(
             selectinload(m.Contract.client_company),
         )
     ).all()
-    return checks.run_all(contracts, as_of or dt.date.today())
+    as_of = as_of or dt.date.today()
+    findings = checks.run_all(contracts, as_of)
+    acts = db.scalars(
+        select(m.BillingAct)
+        .where(m.BillingAct.kind == "subcontractor_act")
+        .options(selectinload(m.BillingAct.lines), selectinload(m.BillingAct.subcontractor))
+    ).all()
+    findings += actuals.check_act_totals(acts)
+    try:
+        ic_margin = load_norms().ic_margin
+    except NormsError:
+        ic_margin = None
+    if ic_margin is not None and acts:
+        objects = db.scalars(select(m.FacilityObject).options(selectinload(m.FacilityObject.contract), selectinload(m.FacilityObject.client_company))).all()
+        lines = [l for a in acts for l in a.lines]
+        findings += actuals.check_acts(list(objects), lines, ic_margin, as_of)
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    return sorted(findings, key=lambda f: (order[f.severity], f.client_code, f.contract_number or ""))
 
 
 @router.post("/import", response_model=ImportSummary, dependencies=[Depends(executive)])

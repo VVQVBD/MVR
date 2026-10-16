@@ -28,6 +28,9 @@ class Settings:
     expiring_days: int = int(os.getenv("EXPIRING_DAYS", "90"))
     # Тарифы по ставке за м² в документах округлены до 100 тг: такие строки не считаются ошибкой.
     per_m2_rounding: Decimal = Decimal(os.getenv("PER_M2_ROUNDING", "100"))
+    # Claude API для разбора текста договоров.
+    claude_model: str = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
+    claude_effort: str = os.getenv("CLAUDE_EFFORT", "medium")
     # Допуск при сверке сумм, KZT.
     money_tolerance: Decimal = Decimal(os.getenv("MONEY_TOLERANCE", "0.01"))
 

@@ -568,5 +568,29 @@ grant select on public.subcontractor_facility_objects to authenticated;;
 
 UPDATE alembic_version SET version_num='0003' WHERE alembic_version.version_num = '0002';
 
+-- Running upgrade 0003 -> 0004
+
+ALTER TABLE billing_act_lines ADD COLUMN hours NUMERIC(10, 2);
+
+ALTER TABLE billing_acts ADD COLUMN issued_at DATE;
+
+ALTER TABLE billing_acts ADD COLUMN stated_total NUMERIC(18, 2);
+
+UPDATE alembic_version SET version_num='0004' WHERE alembic_version.version_num = '0003';
+
+-- Running upgrade 0004 -> 0005
+
+ALTER TABLE contract_addenda ADD COLUMN extends_to DATE;
+
+UPDATE alembic_version SET version_num='0005' WHERE alembic_version.version_num = '0004';
+
+-- Running upgrade 0005 -> 0006
+
+ALTER TABLE billing_acts ADD COLUMN service_from DATE;
+
+ALTER TABLE billing_acts ADD COLUMN service_to DATE;
+
+UPDATE alembic_version SET version_num='0006' WHERE alembic_version.version_num = '0005';
+
 COMMIT;
 

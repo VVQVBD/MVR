@@ -1,12 +1,17 @@
 import "./globals.css";
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-export const metadata = { title: "IC Group — договоры" };
+import { Providers } from "./providers";
+
+export const metadata: Metadata = { title: "IC Group — договоры и риски" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
-      <body>{children}</body>
+      <body className="min-h-screen">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

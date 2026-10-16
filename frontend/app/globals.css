@@ -1,55 +1,61 @@
-:root {
-  --bg: #f7f7f8;
-  --surface: #ffffff;
-  --text: #1a1a1f;
-  --muted: #6b6b76;
-  --border: #e3e3e8;
-  --accent: #2f4fd8;
-  --critical: #b42318;
-  --high: #c2560c;
-  --medium: #a07a00;
-  --low: #4b5563;
-}
-@media (prefers-color-scheme: dark) {
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
   :root {
-    --bg: #111114;
-    --surface: #1b1b20;
-    --text: #ececf1;
-    --muted: #9a9aa6;
-    --border: #2c2c33;
-    --accent: #7d93ff;
-    --critical: #ff6b5e;
-    --high: #ff9f5a;
-    --medium: #e5c04a;
-    --low: #a1a1aa;
+    --background: 0 0% 100%;
+    --foreground: 240 10% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 8%;
+    --primary: 226 70% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 95%;
+    --secondary-foreground: 240 6% 12%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 42%;
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 6% 12%;
+    --destructive: 0 72% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 40 96% 46%;
+    --warning-foreground: 30 60% 12%;
+    --border: 240 6% 89%;
+    --input: 240 6% 89%;
+    --ring: 226 70% 45%;
+    --radius: 0.5rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: 240 8% 7%;
+      --foreground: 0 0% 95%;
+      --card: 240 7% 10%;
+      --card-foreground: 0 0% 95%;
+      --popover: 240 7% 10%;
+      --popover-foreground: 0 0% 95%;
+      --primary: 226 85% 68%;
+      --primary-foreground: 240 10% 8%;
+      --secondary: 240 5% 16%;
+      --secondary-foreground: 0 0% 95%;
+      --muted: 240 5% 15%;
+      --muted-foreground: 240 5% 65%;
+      --accent: 240 5% 18%;
+      --accent-foreground: 0 0% 95%;
+      --destructive: 0 75% 60%;
+      --destructive-foreground: 240 10% 8%;
+      --warning: 42 92% 58%;
+      --warning-foreground: 30 60% 10%;
+      --border: 240 5% 20%;
+      --input: 240 5% 22%;
+      --ring: 226 85% 68%;
+    }
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
   }
 }
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
-h1 { font-size: 20px; margin: 0 0 16px; }
-nav { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-button, input, select {
-  font: inherit; color: inherit; background: var(--surface);
-  border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px;
-}
-button { cursor: pointer; }
-button.active { border-color: var(--accent); color: var(--accent); }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { color: var(--muted); font-weight: 500; white-space: nowrap; }
-.sev { font-weight: 600; text-transform: uppercase; font-size: 12px; }
-.sev-critical { color: var(--critical); }
-.sev-high { color: var(--high); }
-.sev-medium { color: var(--medium); }
-.sev-low { color: var(--low); }
-.muted { color: var(--muted); }
-.error { color: var(--critical); margin: 8px 0; }
-form.login { display: grid; gap: 8px; max-width: 320px; }
-ul.sources { margin: 0; padding-left: 16px; }

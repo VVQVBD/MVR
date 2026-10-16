@@ -198,6 +198,8 @@ class ContractAddendum(Base):
     number: Mapped[str] = mapped_column(String(50))
     signed_at: Mapped[Optional[dt.date]] = mapped_column(Date)
     effective_from: Mapped[Optional[dt.date]] = mapped_column(Date)
+    # Отметка о продлении: ДС продлевает срок договора до этой даты (Спортлайн, Жұлдыз Банк — только так)
+    extends_to: Mapped[Optional[dt.date]] = mapped_column(Date)
     summary: Mapped[Optional[str]] = mapped_column(Text)
     vat_basis: Mapped[str] = mapped_column(String(10), default="unknown")
     vat_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
@@ -340,6 +342,9 @@ class BillingAct(Base):
     kind: Mapped[str] = mapped_column(String(20))
     number: Mapped[Optional[str]] = mapped_column(String(50))
     period_month: Mapped[dt.date] = mapped_column(Date)
+    # Дни оказания услуг внутри месяца; пусто — весь месяц
+    service_from: Mapped[Optional[dt.date]] = mapped_column(Date)
+    service_to: Mapped[Optional[dt.date]] = mapped_column(Date)
     client_company_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("client_companies.id", ondelete="CASCADE"), index=True
     )
@@ -348,6 +353,8 @@ class BillingAct(Base):
         ForeignKey("subcontractors.id", ondelete="CASCADE"), index=True
     )
     status: Mapped[str] = mapped_column(String(10), default="draft")
+    issued_at: Mapped[Optional[dt.date]] = mapped_column(Date)
+    stated_total: Mapped[Optional[Decimal]] = mapped_column(Money)  # «ИТОГО» как написано в акте
     amount_net: Mapped[Optional[Decimal]] = mapped_column(Money)
     vat_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     vat_amount: Mapped[Optional[Decimal]] = mapped_column(Money)
@@ -359,6 +366,7 @@ class BillingAct(Base):
 
     lines: Mapped[List["BillingActLine"]] = relationship(back_populates="act", cascade="all, delete-orphan")
     source: Mapped[Optional[DocumentSourceReference]] = relationship()
+    subcontractor: Mapped[Optional["Subcontractor"]] = relationship()
 
 
 class BillingActLine(Base):
@@ -368,6 +376,7 @@ class BillingActLine(Base):
     act_id: Mapped[int] = mapped_column(ForeignKey("billing_acts.id", ondelete="CASCADE"), index=True)
     facility_object_id: Mapped[Optional[int]] = mapped_column(ForeignKey("facility_objects.id", ondelete="SET NULL"))
     description: Mapped[str] = mapped_column(Text)
+    hours: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
     amount_net: Mapped[Decimal] = mapped_column(Money)
     note: Mapped[Optional[str]] = mapped_column(Text)
 

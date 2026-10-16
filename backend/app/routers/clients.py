@@ -1,4 +1,5 @@
 """Компании-клиенты, субподрядчики, договоры и объекты."""
+import datetime as dt
 from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,7 @@ from app.schemas import (
     ClientCompanyOut,
     ClientCompanyUpdate,
     ContractOut,
+    ExtensionIn,
     FacilityObjectCreate,
     FacilityObjectForSubcontractor,
     FacilityObjectOut,
@@ -104,6 +106,31 @@ def list_contracts(
 @router.get("/contracts/{contract_id}", response_model=ContractOut)
 def get_contract(contract_id: int, user: m.User = Depends(any_user), db: Session = Depends(get_db)):
     return access.get_visible(db, m.Contract, contract_id, access.contracts(user))
+
+
+@router.post("/contracts/{contract_id}/extensions", response_model=ContractOut, status_code=201, dependencies=[Depends(staff)])
+def add_extension(contract_id: int, body: ExtensionIn, db: Session = Depends(get_db)):
+    """Отметка о продлении договора допсоглашением. После неё по договору снова можно выставлять АВР."""
+    contract = db.scalar(select(m.Contract).where(m.Contract.id == contract_id).options(*_contract_options))
+    if contract is None:
+        raise HTTPException(404, detail="Не найдено")
+    current = checks.effective_valid_to(contract)
+    if current is not None and body.extends_to <= current:
+        raise HTTPException(422, detail=f"Договор уже действует до {current}; продление должно быть позже")
+    contract.addenda.append(
+        m.ContractAddendum(
+            number=body.number,
+            signed_at=body.signed_at,
+            effective_from=body.signed_at,
+            extends_to=body.extends_to,
+            summary=body.summary or f"Продление срока до {body.extends_to}",
+        )
+    )
+    today = dt.date.today()
+    contract.status = checks.contract_status(contract, today)
+    contract.status_as_of = today
+    _commit(db)
+    return contract
 
 
 @router.get("/contracts/{contract_id}/text", dependencies=[Depends(staff)])
