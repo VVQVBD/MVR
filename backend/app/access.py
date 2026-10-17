@@ -6,6 +6,7 @@ subcontractor — только объекты, на которые он назн
 
 FastAPI подключается к БД ролью-владельцем (RLS её не ограничивает), поэтому правила продублированы здесь.
 """
+from decimal import Decimal
 from typing import Type
 
 from fastapi import HTTPException
@@ -121,6 +122,57 @@ def operator_points(user: m.User) -> ColumnElement:
     return false()
 
 
+def orders(user: m.User) -> ColumnElement:
+    """Разовые заявки (CleaningOrder): штат — всё; клиент — свои (по компании или кто создал);
+    субподрядчик — заявки, назначенные его операторам; оператор — свои назначенные заявки."""
+    if user.is_staff:
+        return true()
+    if user.role == "client":
+        return and_(
+            m.CleaningOrder.client_company_id.isnot(None), m.CleaningOrder.client_company_id == _cid(user)
+        )
+    if user.role == "subcontractor":
+        return m.CleaningOrder.assigned_operator_id.in_(
+            select(m.Operator.id).where(m.Operator.subcontractor_id == _sid(user))
+        )
+    if user.role == "operator":
+        return m.CleaningOrder.assigned_operator_id == _oid(user)
+    return false()
+
+
+def order_photos(user: m.User) -> ColumnElement:
+    if user.is_staff:
+        return true()
+    if user.role == "operator":
+        return m.OrderPhoto.operator_id == _oid(user)
+    return m.OrderPhoto.order_id.in_(select(m.CleaningOrder.id).where(orders(user)))
+
+
+def bonus_records(user: m.User) -> ColumnElement:
+    if user.is_staff:
+        return true()
+    if user.role == "operator":
+        return m.OperatorBonusRecord.operator_id == _oid(user)
+    if user.role == "subcontractor":
+        return m.OperatorBonusRecord.operator_id.in_(
+            select(m.Operator.id).where(m.Operator.subcontractor_id == _sid(user))
+        )
+    return false()
+
+
+def can_set_preferred_city(user: m.User, operator: "m.Operator", rank: int, total: int) -> bool:
+    """Кто может задать себе район: штат — всегда; оператор — только себе и только если он в топ-30%
+    текущего рейтинга квартала (механика «лидер выбирает район» из предложения)."""
+    if user.is_staff:
+        return True
+    if user.role != "operator" or operator.id != _oid(user):
+        return False
+    if total <= 0:
+        return False
+    share = Decimal(rank - 1) / Decimal(total)
+    return share <= Decimal("0.30")
+
+
 def acts(user: m.User) -> ColumnElement:
     if user.is_staff:
         return true()
@@ -137,6 +189,24 @@ def can_rate_shift_report(user: m.User, report: "m.ShiftReport") -> bool:
         return False
     obj = report.schedule.facility_object
     return obj is not None and obj.client_company_id == _cid(user)
+
+
+def can_rate_order(user: m.User, order: "m.CleaningOrder") -> bool:
+    """Кто может оценить разовую заявку 1–10: персонал — любую; клиент — только свою."""
+    if user.is_staff:
+        return True
+    if user.role != "client":
+        return False
+    return order.client_company_id is not None and order.client_company_id == _cid(user)
+
+
+def discounts(user: m.User) -> ColumnElement:
+    """Скидки клиента за низкую оценку (ClientDiscount): штат — всё; клиент — свои."""
+    if user.is_staff:
+        return true()
+    if user.role == "client":
+        return m.ClientDiscount.client_company_id == _cid(user)
+    return false()
 
 
 def get_visible(db: Session, model: Type, pk, clause: ColumnElement):

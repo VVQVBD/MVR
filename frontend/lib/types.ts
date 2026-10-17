@@ -1,6 +1,6 @@
 // Типы ответов API IC Group. Поля и литералы — как в backend/app/schemas.py.
 
-export type Role = "executive" | "manager" | "client" | "subcontractor";
+export type Role = "executive" | "manager" | "client" | "subcontractor" | "operator";
 export type Severity = "low" | "medium" | "high";
 export type DisputeStatus = "open" | "resolved" | "rejected";
 export type VatBasis = "included" | "excluded" | "unknown";
@@ -14,6 +14,7 @@ export interface Me {
   role: Role;
   client_company_id: number | null;
   subcontractor_id: number | null;
+  operator_id: number | null;
 }
 
 export interface Source {

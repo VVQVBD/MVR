@@ -31,6 +31,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   manager: "Менеджер IC Line",
   subcontractor: "Субподрядчик",
   client: "Клиент",
+  operator: "Оператор",
 };
 
 export const ROLE_HINT: Record<Role, string> = {
@@ -38,4 +39,5 @@ export const ROLE_HINT: Record<Role, string> = {
   manager: "Сквозной доступ к данным, без управления пользователями",
   subcontractor: "P23 ИП «Шанырак Клин»: только объекты из своего графика, без цен клиента",
   client: "ТОО «Модена Ритейл KZ»: только своя компания и свои спорные вопросы",
+  operator: "Личный кабинет: свои заявки, своя премия, выбор района при топ-рейтинге",
 };

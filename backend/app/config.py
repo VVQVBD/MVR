@@ -50,6 +50,28 @@ class Settings:
             (Decimal("0.70"), Decimal(os.getenv("OPERATOR_BONUS_MID", "10000"))),
         ]
     )
+    # Баллы за выполненную разовую заявку — по площади, как shift_base, без отдельной ставки за час.
+    order_points_per_m2: Decimal = Decimal(os.getenv("ORDER_POINTS_PER_M2", "0.05"))
+
+    # Разовые заявки на уборку (CleaningOrder) — пилотные ставки, в пакете организаторов цен на
+    # разовые заявки нет. ₸ за м², без НДС, по уровню качества.
+    order_quality_rates: dict = field(
+        default_factory=lambda: {
+            "surface": Decimal(os.getenv("ORDER_RATE_SURFACE", "150")),
+            "standard": Decimal(os.getenv("ORDER_RATE_STANDARD", "220")),
+            "general": Decimal(os.getenv("ORDER_RATE_GENERAL", "320")),
+        }
+    )
+    # Куда класть фото после уборки — путь относительно backend/. В проде — объектное хранилище.
+    order_photos_dir: str = os.getenv("ORDER_PHOTOS_DIR", "storage/order-photos")
+    order_photo_max_bytes: int = int(os.getenv("ORDER_PHOTO_MAX_BYTES", str(8 * 1024 * 1024)))
+
+    # Скидка клиенту за честную низкую оценку (см. ClientDiscount в app/models.py) — пилотное
+    # значение, фиксированный процент, как премия операторам.
+    client_discount_pct: Decimal = Decimal(os.getenv("CLIENT_DISCOUNT_PCT", "15"))
+    # Доля снизу рейтинга квартала, которой можно закрыть скидочную заявку (та же граница,
+    # что у «топ-30% выбирает район» сверху — симметрично).
+    discount_operator_bottom_share: Decimal = Decimal(os.getenv("DISCOUNT_OPERATOR_BOTTOM_SHARE", "0.30"))
 
 
 settings = Settings()

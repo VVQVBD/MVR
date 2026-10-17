@@ -150,6 +150,7 @@ class OperatorOut(BaseModel):
     code: str
     subcontractor_id: int
     display_name: Optional[str] = None
+    preferred_city: Optional[str] = None
     active: bool
 
 
@@ -177,7 +178,8 @@ class OperatorRatingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    shift_report_id: int
+    shift_report_id: Optional[int] = None
+    order_id: Optional[int] = None
     operator_id: int
     rated_by_id: int
     cleanliness: int
@@ -211,6 +213,100 @@ class OperatorRankingOut(BaseModel):
     quarter_start: dt.date
     quarter_end: dt.date
     rows: List[OperatorRankingRow]
+
+
+class PreferredCityIn(BaseModel):
+    preferred_city: Optional[str] = Field(None, max_length=100, description="null — снять выбор района")
+
+
+# ---------- Разовые заявки (CleaningOrder) ----------
+class OrderCreate(BaseModel):
+    city: str = Field(min_length=1, max_length=100)
+    area_m2: Decimal = Field(gt=0, le=100_000)
+    quality: Literal["surface", "standard", "general"]
+    team_mode: Literal["duo", "team", "custom"]
+    custom_operators_count: Optional[int] = Field(None, ge=1, le=50)
+    client_company_id: Optional[int] = None
+    client_name: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=4000)
+
+    @model_validator(mode="after")
+    def _custom_needs_count(self):
+        if self.team_mode == "custom" and self.custom_operators_count is None:
+            raise ValueError("Для режима «другое» нужно указать число операторов")
+        return self
+
+
+class OrderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_by_id: int
+    client_company_id: Optional[int] = None
+    client_name: Optional[str] = None
+    city: str
+    area_m2: Decimal
+    quality: str
+    team_mode: str
+    custom_operators_count: Optional[int] = None
+    notes: Optional[str] = None
+    price_net: Decimal
+    price_before_discount: Optional[Decimal] = None
+    status: str
+    assigned_operator_id: Optional[int] = None
+    assigned_at: Optional[dt.datetime] = None
+    assigned_by_auto_priority: bool
+    completed_at: Optional[dt.datetime] = None
+    created_at: dt.datetime
+
+
+class OrderAssignIn(BaseModel):
+    operator_id: int
+
+
+# ---------- Скидка клиенту за низкую оценку ----------
+class DiscountOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    client_company_id: int
+    pct: Decimal
+    source_rating_id: int
+    status: str
+    used_on_order_id: Optional[int] = None
+    created_at: dt.datetime
+    used_at: Optional[dt.datetime] = None
+
+
+class OrderPhotoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order_id: int
+    operator_id: int
+    file_path: str
+    content_type: str
+    ai_review_status: str
+    uploaded_at: dt.datetime
+
+
+class BonusCloseIn(BaseModel):
+    scope: Literal["month", "quarter"]
+    as_of: Optional[dt.date] = None
+
+
+class BonusRecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    operator_id: int
+    scope: str
+    period_start: dt.date
+    period_end: dt.date
+    points: int
+    rank: int
+    total_operators: int
+    bonus_amount: Decimal
 
 
 # ---------- Закрытие месяца (экран frontend) ----------

@@ -16,15 +16,19 @@ from app import access
 from app import models as m
 from app.db import get_db
 from app.schemas_v1 import (
+    BonusCloseIn,
+    BonusRecordOut,
     OperatorCreate,
     OperatorOut,
     OperatorRankingOut,
     OperatorRankingRow,
     OperatorRatingCreate,
     OperatorRatingOut,
+    PreferredCityIn,
 )
 from app.security import any_user, require_roles, staff
 from app.services import operator_rating as opr
+from app.services import orders as orders_svc
 
 router = APIRouter(prefix="/api/v1", tags=["operators"])
 can_rate = require_roles("executive", "manager", "client")
@@ -112,26 +116,10 @@ def ranking(
     as_of: Optional[dt.date] = None, subcontractor_id: Optional[int] = None, db: Session = Depends(get_db)
 ):
     as_of = as_of or dt.date.today()
-    start, end = opr.quarter_bounds(as_of)
-
-    op_query = select(m.Operator).where(m.Operator.active.is_(True))
+    rows, start, end = orders_svc.ranking_as_of(db, as_of)
     if subcontractor_id is not None:
-        op_query = op_query.where(m.Operator.subcontractor_id == subcontractor_id)
-    operators = db.scalars(op_query).all()
+        rows = [r for r in rows if r.operator.subcontractor_id == subcontractor_id]
 
-    entries = (
-        db.scalars(
-            select(m.OperatorPointsEntry).where(
-                m.OperatorPointsEntry.operator_id.in_([o.id for o in operators]),
-                m.OperatorPointsEntry.created_at >= dt.datetime.combine(start, dt.time.min),
-                m.OperatorPointsEntry.created_at <= dt.datetime.combine(end, dt.time.max),
-            )
-        ).all()
-        if operators
-        else []
-    )
-
-    rows = opr.build_ranking(operators, entries)
     return OperatorRankingOut(
         quarter_start=start,
         quarter_end=end,
@@ -146,3 +134,42 @@ def ranking(
             for r in rows
         ],
     )
+
+
+@router.patch("/operators/{operator_id}/preferred-city", response_model=OperatorOut)
+def set_preferred_city(
+    operator_id: int, body: PreferredCityIn, user: m.User = Depends(any_user), db: Session = Depends(get_db)
+):
+    """«Лидер рейтинга выбирает район»: топ-30% операторов текущего квартала могут выбрать себе
+    район для автоназначения заявок; штат может менять район любому оператору."""
+    operator = db.get(m.Operator, operator_id)
+    if operator is None:
+        raise HTTPException(404, detail="Оператор не найден")
+    rows, _, _ = orders_svc.ranking_as_of(db, dt.date.today())
+    total = len(rows)
+    rank = next((r.rank for r in rows if r.operator.id == operator_id), total)
+    if not access.can_set_preferred_city(user, operator, rank, total):
+        raise HTTPException(403, detail="Выбор района доступен только топ-30% рейтинга текущего квартала")
+    operator.preferred_city = body.preferred_city
+    _commit(db)
+    return operator
+
+
+@router.post("/operators/bonus/close", response_model=List[BonusRecordOut], dependencies=[Depends(staff)])
+def close_bonus(body: BonusCloseIn, user: m.User = Depends(any_user), db: Session = Depends(get_db)):
+    """Закрытие месяца/квартала: фиксирует снэпшот премии по текущей ленте баллов (idempotent)."""
+    records = orders_svc.close_bonus_period(db, body.scope, body.as_of or dt.date.today(), user.id)
+    _commit(db)
+    return records
+
+
+@router.get("/operators/bonus", response_model=List[BonusRecordOut])
+def list_bonus(
+    scope: Optional[str] = None, user: m.User = Depends(any_user), db: Session = Depends(get_db)
+):
+    q = select(m.OperatorBonusRecord).where(access.bonus_records(user)).order_by(
+        m.OperatorBonusRecord.period_start.desc()
+    )
+    if scope is not None:
+        q = q.where(m.OperatorBonusRecord.scope == scope)
+    return db.scalars(q).all()

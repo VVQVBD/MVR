@@ -1,8 +1,11 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import auth, clients, disputes, operations, operators, v1
+from app.routers import auth, clients, disputes, operations, operators, orders, v1
 
 app = FastAPI(
     title="IC Group — договоры и спорные условия",
@@ -24,6 +27,13 @@ app.include_router(disputes.router)
 app.include_router(operations.router)
 app.include_router(v1.router)
 app.include_router(operators.router)
+app.include_router(orders.router)
+
+# Фото после уборки — пилот: раздаём как статику по случайному имени файла (см. routers/orders.py).
+# В проде — переезд на S3-совместимое хранилище с подписанными URL, без смены схемы API.
+_photos_dir = Path(__file__).resolve().parents[1] / settings.order_photos_dir
+_photos_dir.mkdir(parents=True, exist_ok=True)
+app.mount(f"/{settings.order_photos_dir}", StaticFiles(directory=_photos_dir), name="order-photos")
 
 
 @app.get("/health", tags=["service"])

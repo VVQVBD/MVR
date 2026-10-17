@@ -718,5 +718,163 @@ grant usage, select on all sequences in schema public to authenticated;;
 
 UPDATE alembic_version SET version_num='0008' WHERE alembic_version.version_num = '0007';
 
+-- Running upgrade 0008 -> 0009
+
+CREATE TABLE cleaning_orders (
+    id SERIAL NOT NULL, 
+    created_by_id INTEGER NOT NULL, 
+    client_company_id INTEGER, 
+    client_name VARCHAR(255), 
+    city VARCHAR(100) NOT NULL, 
+    area_m2 NUMERIC(10, 2) NOT NULL, 
+    quality VARCHAR(20) NOT NULL, 
+    team_mode VARCHAR(20) NOT NULL, 
+    custom_operators_count INTEGER, 
+    notes TEXT, 
+    price_net NUMERIC(18, 2) NOT NULL, 
+    status VARCHAR(20) NOT NULL, 
+    assigned_operator_id INTEGER, 
+    assigned_at TIMESTAMP WITH TIME ZONE, 
+    assigned_by_auto_priority BOOLEAN NOT NULL, 
+    completed_at TIMESTAMP WITH TIME ZONE, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    CONSTRAINT pk_cleaning_orders PRIMARY KEY (id), 
+    CONSTRAINT ck_cleaning_orders_quality CHECK (quality IN ('surface', 'standard', 'general')), 
+    CONSTRAINT ck_cleaning_orders_status CHECK (status IN ('new', 'assigned', 'in_progress', 'done', 'cancelled')), 
+    CONSTRAINT ck_cleaning_orders_custom_needs_count CHECK (team_mode <> 'custom' OR custom_operators_count IS NOT NULL), 
+    CONSTRAINT ck_cleaning_orders_team_mode CHECK (team_mode IN ('duo', 'team', 'custom')), 
+    CONSTRAINT ck_cleaning_orders_area_positive CHECK (area_m2 > 0), 
+    CONSTRAINT fk_cleaning_orders_assigned_operator_id_operators FOREIGN KEY(assigned_operator_id) REFERENCES operators (id) ON DELETE SET NULL, 
+    CONSTRAINT fk_cleaning_orders_client_company_id_client_companies FOREIGN KEY(client_company_id) REFERENCES client_companies (id) ON DELETE SET NULL, 
+    CONSTRAINT fk_cleaning_orders_created_by_id_users FOREIGN KEY(created_by_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_cleaning_orders_city ON cleaning_orders (city);
+
+CREATE TABLE operator_bonus_records (
+    id SERIAL NOT NULL, 
+    operator_id INTEGER NOT NULL, 
+    scope VARCHAR(10) NOT NULL, 
+    period_start DATE NOT NULL, 
+    period_end DATE NOT NULL, 
+    points INTEGER NOT NULL, 
+    rank INTEGER NOT NULL, 
+    total_operators INTEGER NOT NULL, 
+    bonus_amount NUMERIC(18, 2) NOT NULL, 
+    closed_by_id INTEGER, 
+    closed_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    CONSTRAINT pk_operator_bonus_records PRIMARY KEY (id), 
+    CONSTRAINT ck_operator_bonus_records_scope CHECK (scope IN ('month', 'quarter')), 
+    CONSTRAINT fk_operator_bonus_records_closed_by_id_users FOREIGN KEY(closed_by_id) REFERENCES users (id) ON DELETE SET NULL, 
+    CONSTRAINT fk_operator_bonus_records_operator_id_operators FOREIGN KEY(operator_id) REFERENCES operators (id) ON DELETE CASCADE, 
+    CONSTRAINT uq_bonus_operator_scope_period UNIQUE (operator_id, scope, period_start)
+);
+
+CREATE INDEX ix_operator_bonus_records_operator_id ON operator_bonus_records (operator_id);
+
+CREATE TABLE order_photos (
+    id SERIAL NOT NULL, 
+    order_id INTEGER NOT NULL, 
+    operator_id INTEGER NOT NULL, 
+    file_path VARCHAR(500) NOT NULL, 
+    content_type VARCHAR(100) NOT NULL, 
+    ai_review_status VARCHAR(20) NOT NULL, 
+    uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    CONSTRAINT pk_order_photos PRIMARY KEY (id), 
+    CONSTRAINT fk_order_photos_operator_id_operators FOREIGN KEY(operator_id) REFERENCES operators (id) ON DELETE CASCADE, 
+    CONSTRAINT fk_order_photos_order_id_cleaning_orders FOREIGN KEY(order_id) REFERENCES cleaning_orders (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_order_photos_order_id ON order_photos (order_id);
+
+ALTER TABLE operator_points_entries ADD COLUMN order_id INTEGER;
+
+ALTER TABLE operator_points_entries ADD CONSTRAINT fk_operator_points_entries_order_id_cleaning_orders FOREIGN KEY(order_id) REFERENCES cleaning_orders (id) ON DELETE SET NULL;
+
+ALTER TABLE operators ADD COLUMN preferred_city VARCHAR(100);
+
+UPDATE alembic_version SET version_num='0009' WHERE alembic_version.version_num = '0008';
+
+-- Running upgrade 0009 -> 0010
+
+-- RLS для разовых заявок (миграция 0009): cleaning_orders, order_photos, operator_bonus_records.
+-- Та же модель доступа, что в app/access.py:
+--   executive, manager  — всё (staff_all);
+--   client               — свои заявки (по client_company_id);
+--   subcontractor        — заявки, назначенные его операторам;
+--   operator             — свои назначенные заявки / свои фото / свои премии.
+-- Идемпотентно, как и db/rls.sql и db/rls_0008_operators.sql.
+
+alter table public.cleaning_orders enable row level security;
+alter table public.order_photos enable row level security;
+alter table public.operator_bonus_records enable row level security;
+
+drop policy if exists staff_all on public.cleaning_orders;
+create policy staff_all on public.cleaning_orders for all to authenticated
+  using (public.app_is_staff()) with check (public.app_is_staff());
+
+drop policy if exists staff_all on public.order_photos;
+create policy staff_all on public.order_photos for all to authenticated
+  using (public.app_is_staff()) with check (public.app_is_staff());
+
+drop policy if exists staff_all on public.operator_bonus_records;
+create policy staff_all on public.operator_bonus_records for all to authenticated
+  using (public.app_is_staff()) with check (public.app_is_staff());
+
+drop policy if exists client_select on public.cleaning_orders;
+create policy client_select on public.cleaning_orders for select to authenticated
+  using (client_company_id = public.app_client_company_id());
+
+drop policy if exists subcontractor_select on public.cleaning_orders;
+create policy subcontractor_select on public.cleaning_orders for select to authenticated
+  using (
+    assigned_operator_id in (
+      select id from public.operators where subcontractor_id = public.app_subcontractor_id()
+    )
+  );
+
+drop policy if exists operator_select on public.cleaning_orders;
+create policy operator_select on public.cleaning_orders for select to authenticated
+  using (assigned_operator_id = public.app_operator_id());
+
+drop policy if exists operator_update on public.cleaning_orders;
+create policy operator_update on public.cleaning_orders for update to authenticated
+  using (assigned_operator_id = public.app_operator_id())
+  with check (assigned_operator_id = public.app_operator_id());
+
+drop policy if exists operator_select on public.order_photos;
+create policy operator_select on public.order_photos for all to authenticated
+  using (operator_id = public.app_operator_id())
+  with check (operator_id = public.app_operator_id());
+
+drop policy if exists client_select on public.order_photos;
+create policy client_select on public.order_photos for select to authenticated
+  using (
+    order_id in (select id from public.cleaning_orders where client_company_id = public.app_client_company_id())
+  );
+
+drop policy if exists subcontractor_select on public.order_photos;
+create policy subcontractor_select on public.order_photos for select to authenticated
+  using (
+    operator_id in (select id from public.operators where subcontractor_id = public.app_subcontractor_id())
+  );
+
+drop policy if exists operator_select on public.operator_bonus_records;
+create policy operator_select on public.operator_bonus_records for select to authenticated
+  using (operator_id = public.app_operator_id());
+
+drop policy if exists subcontractor_select on public.operator_bonus_records;
+create policy subcontractor_select on public.operator_bonus_records for select to authenticated
+  using (
+    operator_id in (select id from public.operators where subcontractor_id = public.app_subcontractor_id())
+  );
+
+grant select, insert, update, delete on public.cleaning_orders to authenticated;
+grant select, insert, update, delete on public.order_photos to authenticated;
+grant select, insert, update, delete on public.operator_bonus_records to authenticated;
+grant usage, select on all sequences in schema public to authenticated;;
+
+UPDATE alembic_version SET version_num='0010' WHERE alembic_version.version_num = '0009';
+
 COMMIT;
 
