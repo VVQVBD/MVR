@@ -43,6 +43,7 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)):
         role=body.role,
         client_company_id=body.client_company_id if body.role == "client" else None,
         subcontractor_id=body.subcontractor_id if body.role == "subcontractor" else None,
+        operator_id=body.operator_id if body.role == "operator" else None,
     )
     db.add(user)
     db.commit()

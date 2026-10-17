@@ -21,6 +21,7 @@ from app.schemas import (
 )
 from app.security import any_user, require_roles, staff
 from app.services import checks, costing
+from app.services import operator_rating as opr
 
 router = APIRouter(tags=["operations"])
 staff_or_subcontractor = require_roles("executive", "manager", "subcontractor")
@@ -93,8 +94,24 @@ def create_report(body: ShiftReportCreate, user: m.User = Depends(staff_or_subco
     month = schedule.period_month
     if (body.work_date.year, body.work_date.month) != (month.year, month.month):
         raise HTTPException(422, detail="Дата смены вне месяца графика")
+    if body.operator_id is not None:
+        operator = db.get(m.Operator, body.operator_id)
+        if operator is None or operator.subcontractor_id != schedule.subcontractor_id:
+            raise HTTPException(422, detail="Оператор не из этого субподрядчика или не найден")
     report = m.ShiftReport(**body.model_dump(), reported_by_id=user.id)
     db.add(report)
+    if body.operator_id is not None and body.status in ("done", "partial"):
+        # shift_report=report (а не report.id) — ORM свяжет запись по id сам при единственном
+        # commit ниже; без промежуточного flush ошибку уникальности ловит только _commit().
+        db.add(
+            m.OperatorPointsEntry(
+                operator_id=body.operator_id,
+                shift_report=report,
+                points=opr.shift_base_points(report),
+                reason="shift_base",
+                note=f"Смена {body.work_date} ({body.status}, {report.hours or 0} ч)",
+            )
+        )
     _commit(db)
     return report
 

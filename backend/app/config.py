@@ -34,5 +34,22 @@ class Settings:
     # Допуск при сверке сумм, KZT.
     money_tolerance: Decimal = Decimal(os.getenv("MONEY_TOLERANCE", "0.01"))
 
+    # Пилот рейтинга операторов — см. docs/OPERATOR_RATING_PROPOSAL.md, формула (вариант 2).
+    # Баллы лояльности за отработанный час смены (status done=1.0, partial=0.5).
+    operator_points_per_hour: int = int(os.getenv("OPERATOR_POINTS_PER_HOUR", "10"))
+    # Надбавка/штраф за оценку клиента: (средний балл 1–10 минус середина 5) × это число.
+    operator_points_per_rating_unit: int = int(os.getenv("OPERATOR_POINTS_PER_RATING_UNIT", "20"))
+    # Оценка ниже этого балла по любому критерию требует обязательного комментария.
+    operator_rating_comment_threshold: int = int(os.getenv("OPERATOR_RATING_COMMENT_THRESHOLD", "6"))
+    # Премия по месту в рейтинге за квартал: верхние N% участников получают фиксированную сумму, KZT.
+    # Доли идут по возрастанию без перекрытия: первая строка — самый узкий топ.
+    operator_bonus_tiers: List[tuple] = field(
+        default_factory=lambda: [
+            (Decimal("0.10"), Decimal(os.getenv("OPERATOR_BONUS_TOP", "50000"))),
+            (Decimal("0.30"), Decimal(os.getenv("OPERATOR_BONUS_HIGH", "25000"))),
+            (Decimal("0.70"), Decimal(os.getenv("OPERATOR_BONUS_MID", "10000"))),
+        ]
+    )
+
 
 settings = Settings()

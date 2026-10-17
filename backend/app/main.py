@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, clients, disputes, operations, v1
+from app.routers import auth, clients, disputes, operations, operators, v1
 
 app = FastAPI(
     title="IC Group — договоры и спорные условия",
@@ -23,6 +23,7 @@ app.include_router(clients.router)
 app.include_router(disputes.router)
 app.include_router(operations.router)
 app.include_router(v1.router)
+app.include_router(operators.router)
 
 
 @app.get("/health", tags=["service"])

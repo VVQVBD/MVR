@@ -298,3 +298,57 @@ def test_audit_validation_and_rbac(api, db_session):
     assert api.post("/api/v1/contracts/audit-scan", json=only_injection, headers=h).status_code == 422
     for who in ("modena@test.local", "p23@test.local"):
         assert api.post("/api/v1/contracts/audit-scan", json={"contract_id": 1}, headers=login(api, who)).status_code == 403
+
+
+# =====================================================================================
+# ops/month-close — экран frontend/app/page.tsx (fastapi-источник вместо статического JSON)
+# =====================================================================================
+def test_month_close_matches_cities_and_kpis(api, with_acts):
+    h = login(api, "manager@test.local")
+    r = api.get("/api/v1/ops/month-close", params={"period": "2026-09-01"}, headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert {o["id"] for o in data["objects"]} == {"nord", "samal-city"}
+    assert data["unlinkedShiftsCount"] == 1150  # «Отметки» в 05_Факт_сентябрь_2026.xlsx
+    assert len(data["disputes"]) == 11
+
+    nord = next(o for o in data["objects"] if o["id"] == "nord")
+    assert len(nord["reconciliation"]) == 6  # объекты Модены/Спортлайн/Капри/Медеу в ТРЦ «Норд»
+    assert Decimal(nord["kpi"]["revenue"]) == Decimal("16066640.00")
+    assert Decimal(nord["kpi"]["subcontractorPayout"]) == Decimal("12233587.00")
+    assert Decimal(nord["kpi"]["marginBeforeOperatorPayout"]) == Decimal("3833053.00")
+
+    samal = next(o for o in data["objects"] if o["id"] == "samal-city")
+    assert Decimal(samal["kpi"]["revenue"]) == Decimal("1221080.00")
+    assert Decimal(samal["kpi"]["subcontractorPayout"]) == Decimal("959392.00")
+
+    # у каждой строки сверки — выручка со ссылками на источник (объект или договор); акты сентября
+    # найдены для всех 6 объектов «Норда» — discrepancies=2 здесь только от открытых замечаний клиентов
+    for row in nord["reconciliation"]:
+        assert row["revenue"]["sources"], row["id"]
+        assert row["status"] == "closed" and row["anomalies"] == []
+    assert sum(1 for r in nord["clientRemarks"] if r["status"] == "open") == 2
+
+
+def test_month_close_payout_traces_to_act_line(api, db_session, with_acts):
+    h = login(api, "manager@test.local")
+    data = api.get("/api/v1/ops/month-close", params={"period": "2026-09-01"}, headers=h).json()
+    nord = next(o for o in data["objects"] if o["id"] == "nord")
+    modena = next(row for row in nord["reconciliation"] if row["zone"] == "Магазин в ТРЦ «Норд»" and row["client"].startswith("ТОО «Модена"))
+    assert Decimal(modena["subcontractorPayout"]["value"]) == Decimal("246330.00")
+    [src] = modena["subcontractorPayout"]["sources"]
+    assert src["file"] == "05_Факт_сентябрь_2026.xlsx" and src["sheet"] == "Акт субподрядчика P23 сентябрь" and src["row"] == 3
+
+
+def test_month_close_without_acts_flags_everything_as_missing(api, db_session):
+    h = login(api, "manager@test.local")
+    data = api.get("/api/v1/ops/month-close", params={"period": "2026-09-01"}, headers=h).json()
+    nord = next(o for o in data["objects"] if o["id"] == "nord")
+    assert all(row["status"] == "review" for row in nord["reconciliation"])
+    assert all(Decimal(row["subcontractorPayout"]["value"]) == 0 for row in nord["reconciliation"])
+
+
+def test_month_close_rbac(api, with_acts):
+    for who in ("modena@test.local", "p23@test.local"):
+        assert api.get("/api/v1/ops/month-close", headers=login(api, who)).status_code == 403
+    assert api.get("/api/v1/ops/month-close").status_code == 401

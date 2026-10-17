@@ -41,7 +41,7 @@ Money = Numeric(18, 2)
 Area = Numeric(12, 2)
 Json = JSON().with_variant(JSONB(), "postgresql")
 
-ROLES = ("executive", "manager", "subcontractor", "client")
+ROLES = ("executive", "manager", "subcontractor", "client", "operator")
 STAFF_ROLES = ("executive", "manager")
 SEVERITIES = ("low", "medium", "high")
 DISPUTE_STATUSES = ("open", "resolved", "rejected")
@@ -79,6 +79,7 @@ class User(Base):
         one_of("role", ROLES),
         CheckConstraint("role <> 'client' OR client_company_id IS NOT NULL", name="client_has_company"),
         CheckConstraint("role <> 'subcontractor' OR subcontractor_id IS NOT NULL", name="subcontractor_has_id"),
+        CheckConstraint("role <> 'operator' OR operator_id IS NOT NULL", name="operator_has_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -90,10 +91,12 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20))
     client_company_id: Mapped[Optional[int]] = mapped_column(ForeignKey("client_companies.id", ondelete="CASCADE"))
     subcontractor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("subcontractors.id", ondelete="CASCADE"))
+    operator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("operators.id", ondelete="CASCADE"))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     client_company: Mapped[Optional["ClientCompany"]] = relationship()
     subcontractor: Mapped[Optional["Subcontractor"]] = relationship()
+    operator: Mapped[Optional["Operator"]] = relationship()
 
     @property
     def is_staff(self) -> bool:
@@ -125,6 +128,77 @@ class Subcontractor(Base):
     bin: Mapped[Optional[str]] = mapped_column(String(12))
 
     facility_objects: Mapped[List["FacilityObject"]] = relationship(back_populates="subcontractor")
+
+
+class Operator(Base):
+    """Оператор ОПУ — личность за табельным кодом (см. ShiftReport.operator_code).
+
+    Пилот рейтинга: баллы лояльности и оценки клиента/менеджера начисляются оператору,
+    не компании-субподрядчику. ФИО намеренно не храним (как и в остальных отметках смен) —
+    только код и отображаемое имя, которое задаёт сам субподрядчик/менеджер.
+    """
+
+    __tablename__ = "operators"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True)  # напр. OP-047, как в ShiftReport.operator_code
+    subcontractor_id: Mapped[int] = mapped_column(ForeignKey("subcontractors.id", ondelete="CASCADE"), index=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(100))
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    subcontractor: Mapped["Subcontractor"] = relationship()
+
+
+class OperatorRating(Base):
+    """Оценка одной отработанной смены клиентом или менеджером, 1–10 по четырём критериям."""
+
+    __tablename__ = "operator_ratings"
+    __table_args__ = (
+        UniqueConstraint("shift_report_id", name="uq_operator_ratings_shift_report"),
+        CheckConstraint(
+            "cleanliness BETWEEN 1 AND 10 AND quality BETWEEN 1 AND 10 "
+            "AND promptness BETWEEN 1 AND 10 AND courtesy BETWEEN 1 AND 10",
+            name="scores_1_10",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shift_report_id: Mapped[int] = mapped_column(ForeignKey("shift_reports.id", ondelete="CASCADE"), index=True)
+    operator_id: Mapped[int] = mapped_column(ForeignKey("operators.id", ondelete="CASCADE"), index=True)
+    rated_by_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    cleanliness: Mapped[int]
+    quality: Mapped[int]
+    promptness: Mapped[int]
+    courtesy: Mapped[int]
+    average: Mapped[Decimal] = mapped_column(Numeric(3, 1))
+    # Обязателен, если хоть один критерий низкий — отрицательную оценку нельзя оставить без объяснения.
+    comment: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    shift_report: Mapped["ShiftReport"] = relationship()
+    operator: Mapped[Operator] = relationship()
+    rated_by: Mapped[Optional["User"]] = relationship()
+
+
+class OperatorPointsEntry(Base):
+    """Запись в ленте баллов лояльности — один оператор, одна причина, одна смена (если есть).
+
+    Лента, а не просто счётчик: рейтинг всегда можно пересчитать и объяснить, откуда взялось число.
+    """
+
+    __tablename__ = "operator_points_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    operator_id: Mapped[int] = mapped_column(ForeignKey("operators.id", ondelete="CASCADE"), index=True)
+    shift_report_id: Mapped[Optional[int]] = mapped_column(ForeignKey("shift_reports.id", ondelete="SET NULL"))
+    points: Mapped[int]
+    reason: Mapped[str] = mapped_column(String(50))  # "shift_base" | "rating_adjustment"
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    operator: Mapped[Operator] = relationship()
+    shift_report: Mapped[Optional["ShiftReport"]] = relationship()
 
 
 class DocumentSourceReference(Base):
@@ -316,6 +390,9 @@ class ShiftReport(Base):
     work_date: Mapped[dt.date] = mapped_column(Date)
     # Табельный код оператора, без ФИО.
     operator_code: Mapped[str] = mapped_column(String(32))
+    # Привязка к Operator — опциональна (старые/ручные отметки могли не завести оператора);
+    # без неё смену нельзя оценить и начислить баллы.
+    operator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("operators.id", ondelete="SET NULL"), index=True)
     status: Mapped[str] = mapped_column(String(10))
     started_at: Mapped[Optional[dt.time]] = mapped_column(Time)
     ended_at: Mapped[Optional[dt.time]] = mapped_column(Time)
@@ -325,6 +402,7 @@ class ShiftReport(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     schedule: Mapped[ShiftSchedule] = relationship(back_populates="reports")
+    operator: Mapped[Optional[Operator]] = relationship()
 
 
 class BillingAct(Base):

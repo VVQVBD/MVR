@@ -3,7 +3,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas import Finding
 
@@ -134,6 +134,314 @@ class NormsCatalogOut(BaseModel):
     vat_rates: dict
     ic_margin_pct: Decimal
     min_ic_margin_pct: Decimal
+
+
+# ---------- Пилот рейтинга операторов ----------
+class OperatorCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=32, description="Табельный код, напр. OP-047")
+    subcontractor_id: int
+    display_name: Optional[str] = Field(None, max_length=100)
+
+
+class OperatorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str
+    subcontractor_id: int
+    display_name: Optional[str] = None
+    active: bool
+
+
+class OperatorRatingCreate(BaseModel):
+    cleanliness: int = Field(ge=1, le=10)
+    quality: int = Field(ge=1, le=10)
+    promptness: int = Field(ge=1, le=10)
+    courtesy: int = Field(ge=1, le=10)
+    comment: Optional[str] = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _comment_required_for_low_score(self):
+        from app.services.operator_rating import rating_needs_comment
+
+        if rating_needs_comment(self.cleanliness, self.quality, self.promptness, self.courtesy) and not (
+            self.comment and self.comment.strip()
+        ):
+            raise ValueError(
+                "Любой критерий ниже порога требует комментария: чем объяснить низкую оценку?"
+            )
+        return self
+
+
+class OperatorRatingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    shift_report_id: int
+    operator_id: int
+    rated_by_id: int
+    cleanliness: int
+    quality: int
+    promptness: int
+    courtesy: int
+    average: Decimal
+    comment: Optional[str] = None
+
+
+class OperatorPointsEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    operator_id: int
+    shift_report_id: Optional[int] = None
+    points: int
+    reason: str
+    note: Optional[str] = None
+
+
+class OperatorRankingRow(BaseModel):
+    operator: OperatorOut
+    points: int
+    shifts_done: int
+    rank: int
+    bonus: Decimal
+
+
+class OperatorRankingOut(BaseModel):
+    quarter_start: dt.date
+    quarter_end: dt.date
+    rows: List[OperatorRankingRow]
+
+
+# ---------- Закрытие месяца (экран frontend) ----------
+class MCSourceRef(BaseModel):
+    file: str
+    sheet: Optional[str] = None
+    row: Optional[int] = None
+    page: Optional[int] = None
+    field: Optional[str] = None
+
+
+class MCAuditedMoney(BaseModel):
+    value: Optional[Decimal] = None
+    sources: List[MCSourceRef] = []
+    calculation: Optional[str] = None
+
+
+class MCAuditedText(BaseModel):
+    value: str
+    sources: List[MCSourceRef] = []
+    calculation: Optional[str] = None
+
+
+class MCAnomaly(BaseModel):
+    code: str
+    severity: Literal["low", "medium", "high"]
+    message: str
+    sources: List[MCSourceRef] = []
+
+
+class MCReconciliationRow(BaseModel):
+    id: str
+    client: str
+    zone: str
+    subcontractor: Optional[str] = None
+    vatBasis: str
+    contract: MCAuditedText
+    revenue: MCAuditedMoney
+    subcontractorPayout: MCAuditedMoney
+    operatorPayout: MCAuditedMoney
+    marginBeforeOperatorPayout: MCAuditedMoney
+    anomalies: List[MCAnomaly] = []
+    status: Literal["closed", "review"]
+
+
+class MCClientRemark(BaseModel):
+    id: str
+    description: str
+    detectedAt: str
+    dueAt: str
+    resolvedAt: Optional[str] = None
+    status: Literal["open", "resolved"]
+    sources: List[MCSourceRef] = []
+
+
+class MCKpi(BaseModel):
+    revenue: Decimal
+    subcontractorPayout: Decimal
+    marginBeforeOperatorPayout: Decimal
+    discrepancies: int
+    operatorPayout: Optional[Decimal] = None
+    operatorPayoutStatus: str
+
+
+class MCObject(BaseModel):
+    id: Literal["nord", "samal-city"]
+    title: str
+    reconciliation: List[MCReconciliationRow]
+    clientRemarks: List[MCClientRemark]
+    kpi: MCKpi
+
+
+class MCDispute(BaseModel):
+    id: str
+    severity: Literal["low", "medium", "high"]
+    topic: str
+    description: str
+    request: Optional[str] = None
+    status: str
+    sources: List[MCSourceRef] = []
+
+
+class MonthCloseOut(BaseModel):
+    schemaVersion: str
+    period: str
+    currency: str
+    sourcePolicy: str
+    objects: List[MCObject]
+    unlinkedShiftsCount: int
+    disputes: List[MCDispute]
+
+
+# ---------- 3. Всё ли в порядке с договорами ----------
+class AuditScanIn(BaseModel):
+    contract_id: Optional[int] = Field(None, description="Проверить договор из базы")
+    text: Optional[str] = Field(None, max_length=400_000, description="Текст договора (OCR/копия)")
+    pdf_base64: Optional[str] = Field(None, description="Скан договора, PDF в base64")
+    client_code: Optional[str] = None
+    as_of: Optional[dt.date] = None
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        given = [x for x in (self.contract_id, self.text, self.pdf_base64) if x]
+        if len(given) != 1:
+            raise ValueError("Передайте ровно одно: contract_id, text или pdf_base64")
+        return self
+
+
+class ExtractedLineOut(BaseModel):
+    object_name: str
+    city: Optional[str] = None
+    area_m2: Optional[Decimal] = None
+    price_per_m2: Optional[Decimal] = None
+    monthly_amount: Optional[Decimal] = None
+    page: Optional[int] = None
+
+
+class ExtractionOut(BaseModel):
+    model: str
+    request_id: Optional[str] = None
+    contract_number: Optional[str] = None
+    client_name: Optional[str] = None
+    valid_from: Optional[dt.date] = None
+    valid_until: Optional[dt.date] = None
+    renewal: str
+    renewal_quote: Optional[str] = None
+    vat_basis: str
+    vat_rate: Optional[Decimal] = None
+    stated_monthly_total: Optional[Decimal] = None
+    lines: List[ExtractedLineOut] = []
+    amounts_not_in_text: List[str] = Field([], description="Суммы, которых нет в тексте — в проверки не идут")
+    verified_against_text: bool
+
+
+class AuditOut(BaseModel):
+    source: Literal["database", "text", "pdf"]
+    as_of: dt.date
+    contract_number: Optional[str] = None
+    contract_id: Optional[int] = None
+    verdict: Literal["ok", "warnings", "problems"]
+    findings: List[Finding]
+    removed_instructions: List[str] = Field([], description="Строки-инструкции, вырезанные до разбора")
+    extraction: Optional[ExtractionOut] = None
+
+class MCSourceRef(BaseModel):
+    file: str
+    sheet: Optional[str] = None
+    row: Optional[int] = None
+    page: Optional[int] = None
+    field: Optional[str] = None
+
+
+class MCAuditedMoney(BaseModel):
+    value: Optional[Decimal] = None
+    sources: List[MCSourceRef] = []
+    calculation: Optional[str] = None
+
+
+class MCAuditedText(BaseModel):
+    value: str
+    sources: List[MCSourceRef] = []
+    calculation: Optional[str] = None
+
+
+class MCAnomaly(BaseModel):
+    code: str
+    severity: Literal["low", "medium", "high"]
+    message: str
+    sources: List[MCSourceRef] = []
+
+
+class MCReconciliationRow(BaseModel):
+    id: str
+    client: str
+    zone: str
+    subcontractor: Optional[str] = None
+    vatBasis: str
+    contract: MCAuditedText
+    revenue: MCAuditedMoney
+    subcontractorPayout: MCAuditedMoney
+    operatorPayout: MCAuditedMoney
+    marginBeforeOperatorPayout: MCAuditedMoney
+    anomalies: List[MCAnomaly] = []
+    status: Literal["closed", "review"]
+
+
+class MCClientRemark(BaseModel):
+    id: str
+    description: str
+    detectedAt: str
+    dueAt: str
+    resolvedAt: Optional[str] = None
+    status: Literal["open", "resolved"]
+    sources: List[MCSourceRef] = []
+
+
+class MCKpi(BaseModel):
+    revenue: Decimal
+    subcontractorPayout: Decimal
+    marginBeforeOperatorPayout: Decimal
+    discrepancies: int
+    operatorPayout: Optional[Decimal] = None
+    operatorPayoutStatus: str
+
+
+class MCObject(BaseModel):
+    id: Literal["nord", "samal-city"]
+    title: str
+    reconciliation: List[MCReconciliationRow]
+    clientRemarks: List[MCClientRemark]
+    kpi: MCKpi
+
+
+class MCDispute(BaseModel):
+    id: str
+    severity: Literal["low", "medium", "high"]
+    topic: str
+    description: str
+    request: Optional[str] = None
+    status: str
+    sources: List[MCSourceRef] = []
+
+
+class MonthCloseOut(BaseModel):
+    schemaVersion: str
+    period: str
+    currency: str
+    sourcePolicy: str
+    objects: List[MCObject]
+    unlinkedShiftsCount: int
+    disputes: List[MCDispute]
 
 
 # ---------- 3. Всё ли в порядке с договорами ----------

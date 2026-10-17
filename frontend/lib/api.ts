@@ -54,6 +54,8 @@ export const api = {
   subcontractors: (token: string) => request<Subcontractor[]>("/subcontractors", token),
   objects: (token: string) => request<FacilityObject[]>("/objects", token),
   schedules: (token: string) => request<Schedule[]>("/schedules", token),
+  monthClose: (token: string, period: string) =>
+    request<unknown>(`/api/v1/ops/month-close?period=${period}`, token),
 };
 
 // ---------- форматирование ----------

@@ -592,5 +592,131 @@ ALTER TABLE billing_acts ADD COLUMN service_to DATE;
 
 UPDATE alembic_version SET version_num='0006' WHERE alembic_version.version_num = '0005';
 
+-- Running upgrade 0006 -> 0007
+
+CREATE TABLE operators (
+    id SERIAL NOT NULL, 
+    code VARCHAR(32) NOT NULL, 
+    subcontractor_id INTEGER NOT NULL, 
+    display_name VARCHAR(100), 
+    active BOOLEAN NOT NULL, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    CONSTRAINT pk_operators PRIMARY KEY (id), 
+    CONSTRAINT fk_operators_subcontractor_id_subcontractors FOREIGN KEY(subcontractor_id) REFERENCES subcontractors (id) ON DELETE CASCADE, 
+    CONSTRAINT uq_operators_code UNIQUE (code)
+);
+
+CREATE INDEX ix_operators_subcontractor_id ON operators (subcontractor_id);
+
+CREATE TABLE operator_points_entries (
+    id SERIAL NOT NULL, 
+    operator_id INTEGER NOT NULL, 
+    shift_report_id INTEGER, 
+    points INTEGER NOT NULL, 
+    reason VARCHAR(50) NOT NULL, 
+    note TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    CONSTRAINT pk_operator_points_entries PRIMARY KEY (id), 
+    CONSTRAINT fk_operator_points_entries_operator_id_operators FOREIGN KEY(operator_id) REFERENCES operators (id) ON DELETE CASCADE, 
+    CONSTRAINT fk_operator_points_entries_shift_report_id_shift_reports FOREIGN KEY(shift_report_id) REFERENCES shift_reports (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_operator_points_entries_operator_id ON operator_points_entries (operator_id);
+
+CREATE TABLE operator_ratings (
+    id SERIAL NOT NULL, 
+    shift_report_id INTEGER NOT NULL, 
+    operator_id INTEGER NOT NULL, 
+    rated_by_id INTEGER NOT NULL, 
+    cleanliness INTEGER NOT NULL, 
+    quality INTEGER NOT NULL, 
+    promptness INTEGER NOT NULL, 
+    courtesy INTEGER NOT NULL, 
+    average NUMERIC(3, 1) NOT NULL, 
+    comment TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    CONSTRAINT pk_operator_ratings PRIMARY KEY (id), 
+    CONSTRAINT ck_operator_ratings_scores_1_10 CHECK (cleanliness BETWEEN 1 AND 10 AND quality BETWEEN 1 AND 10 AND promptness BETWEEN 1 AND 10 AND courtesy BETWEEN 1 AND 10), 
+    CONSTRAINT fk_operator_ratings_operator_id_operators FOREIGN KEY(operator_id) REFERENCES operators (id) ON DELETE CASCADE, 
+    CONSTRAINT fk_operator_ratings_rated_by_id_users FOREIGN KEY(rated_by_id) REFERENCES users (id) ON DELETE SET NULL, 
+    CONSTRAINT fk_operator_ratings_shift_report_id_shift_reports FOREIGN KEY(shift_report_id) REFERENCES shift_reports (id) ON DELETE CASCADE, 
+    CONSTRAINT uq_operator_ratings_shift_report UNIQUE (shift_report_id)
+);
+
+CREATE INDEX ix_operator_ratings_operator_id ON operator_ratings (operator_id);
+
+CREATE INDEX ix_operator_ratings_shift_report_id ON operator_ratings (shift_report_id);
+
+ALTER TABLE shift_reports ADD COLUMN operator_id INTEGER;
+
+CREATE INDEX ix_shift_reports_operator_id ON shift_reports (operator_id);
+
+ALTER TABLE shift_reports ADD CONSTRAINT fk_shift_reports_operator_id_operators FOREIGN KEY(operator_id) REFERENCES operators (id) ON DELETE SET NULL;
+
+ALTER TABLE users ADD COLUMN operator_id INTEGER;
+
+ALTER TABLE users ADD CONSTRAINT fk_users_operator_id_operators FOREIGN KEY(operator_id) REFERENCES operators (id) ON DELETE CASCADE;
+
+ALTER TABLE users DROP CONSTRAINT ck_users_role;
+
+ALTER TABLE users ADD CONSTRAINT ck_users_role CHECK (role IN ('executive', 'manager', 'subcontractor', 'client', 'operator'));
+
+ALTER TABLE users ADD CONSTRAINT ck_users_operator_has_id CHECK (role <> 'operator' OR operator_id IS NOT NULL);
+
+UPDATE alembic_version SET version_num='0007' WHERE alembic_version.version_num = '0006';
+
+-- Running upgrade 0007 -> 0008
+
+-- RLS для пилота рейтинга операторов (миграция 0007): operators, operator_ratings,
+-- operator_points_entries. Та же модель доступа, что в db/rls.sql:
+--   executive, manager  — всё (staff_all);
+--   subcontractor       — свои операторы (operators), но не их оценки и баллы;
+--   operator            — только свои строки в operators / operator_ratings / operator_points_entries.
+-- Идемпотентно, как и db/rls.sql.
+
+create or replace function public.app_operator_id() returns integer
+language sql stable security definer set search_path = public, pg_temp as $$
+  select operator_id from public.users where auth_user_id = auth.uid() and role = 'operator'
+$$;
+
+alter table public.operators enable row level security;
+alter table public.operator_ratings enable row level security;
+alter table public.operator_points_entries enable row level security;
+
+drop policy if exists staff_all on public.operators;
+create policy staff_all on public.operators for all to authenticated
+  using (public.app_is_staff()) with check (public.app_is_staff());
+
+drop policy if exists staff_all on public.operator_ratings;
+create policy staff_all on public.operator_ratings for all to authenticated
+  using (public.app_is_staff()) with check (public.app_is_staff());
+
+drop policy if exists staff_all on public.operator_points_entries;
+create policy staff_all on public.operator_points_entries for all to authenticated
+  using (public.app_is_staff()) with check (public.app_is_staff());
+
+drop policy if exists subcontractor_select on public.operators;
+create policy subcontractor_select on public.operators for select to authenticated
+  using (subcontractor_id = public.app_subcontractor_id());
+
+drop policy if exists operator_select on public.operators;
+create policy operator_select on public.operators for select to authenticated
+  using (id = public.app_operator_id());
+
+drop policy if exists operator_select on public.operator_ratings;
+create policy operator_select on public.operator_ratings for select to authenticated
+  using (operator_id = public.app_operator_id());
+
+drop policy if exists operator_select on public.operator_points_entries;
+create policy operator_select on public.operator_points_entries for select to authenticated
+  using (operator_id = public.app_operator_id());
+
+grant select, insert, update, delete on public.operators to authenticated;
+grant select, insert, update, delete on public.operator_ratings to authenticated;
+grant select, insert, update, delete on public.operator_points_entries to authenticated;
+grant usage, select on all sequences in schema public to authenticated;;
+
+UPDATE alembic_version SET version_num='0008' WHERE alembic_version.version_num = '0007';
+
 COMMIT;
 

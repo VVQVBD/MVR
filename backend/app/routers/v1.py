@@ -23,6 +23,7 @@ from app.db_async import get_async_db
 from app.schemas import DisputeOut, Finding
 from app.schemas_v1 import (
     AuditOut,
+    MonthCloseOut,
     AuditScanIn,
     BenchmarkOut,
     BudgetOut,
@@ -42,6 +43,7 @@ from app.security import any_user, staff
 from app.services import checks, costing
 from app.services import claude_audit as ca
 from app.services import estimate as est
+from app.services import month_close as mc
 from app.services.norms import Norms, NormsError, load_norms
 
 router = APIRouter(prefix="/api/v1", tags=["api v1"])
@@ -595,3 +597,14 @@ async def discrepancies(
         item.client_name = d.client_company.name if d.client_company else None
         out.append(item)
     return out
+
+
+# =====================================================================================
+# Закрытие месяца (экран frontend/app/page.tsx — ops-консоль, без формы входа)
+# =====================================================================================
+@router.get("/ops/month-close", response_model=MonthCloseOut, dependencies=[Depends(staff)])
+async def month_close(
+    period: dt.date = Query(dt.date(2026, 9, 1), description="Первое число месяца закрытия"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    return await mc.build(db, period)

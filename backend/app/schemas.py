@@ -5,7 +5,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Role = Literal["executive", "manager", "subcontractor", "client"]
+Role = Literal["executive", "manager", "subcontractor", "client", "operator"]
 Severity = Literal["low", "medium", "high"]
 FindingSeverity = Literal["low", "medium", "high", "critical"]
 DisputeStatus = Literal["open", "resolved", "rejected"]
@@ -33,6 +33,7 @@ class UserCreate(BaseModel):
     role: Role
     client_company_id: Optional[int] = None
     subcontractor_id: Optional[int] = None
+    operator_id: Optional[int] = None
 
     @model_validator(mode="after")
     def _binding(self):
@@ -40,6 +41,8 @@ class UserCreate(BaseModel):
             raise ValueError("Для роли client нужен client_company_id")
         if self.role == "subcontractor" and self.subcontractor_id is None:
             raise ValueError("Для роли subcontractor нужен subcontractor_id")
+        if self.role == "operator" and self.operator_id is None:
+            raise ValueError("Для роли operator нужен operator_id")
         return self
 
 
@@ -49,6 +52,7 @@ class UserOut(ORM):
     role: Role
     client_company_id: Optional[int] = None
     subcontractor_id: Optional[int] = None
+    operator_id: Optional[int] = None
 
 
 # ---------- справочники ----------
@@ -258,6 +262,7 @@ class ShiftReportCreate(BaseModel):
     schedule_id: int
     work_date: dt.date
     operator_code: str = Field(min_length=1, max_length=32)
+    operator_id: Optional[int] = Field(None, description="Для начисления баллов лояльности — см. пилот рейтинга")
     status: ShiftStatus
     started_at: Optional[dt.time] = None
     ended_at: Optional[dt.time] = None

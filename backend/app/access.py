@@ -24,6 +24,10 @@ def _sid(user: m.User):
     return user.subcontractor_id
 
 
+def _oid(user: m.User):
+    return user.operator_id
+
+
 def subcontractor_object_ids(user: m.User):
     return select(m.ShiftSchedule.facility_object_id).where(m.ShiftSchedule.subcontractor_id == _sid(user))
 
@@ -86,7 +90,35 @@ def schedules(user: m.User) -> ColumnElement:
 def reports(user: m.User) -> ColumnElement:
     if user.is_staff:
         return true()
+    if user.role == "operator":
+        return m.ShiftReport.operator_id == _oid(user)
     return m.ShiftReport.schedule_id.in_(select(m.ShiftSchedule.id).where(schedules(user)))
+
+
+def operators(user: m.User) -> ColumnElement:
+    if user.is_staff:
+        return true()
+    if user.role == "subcontractor":
+        return m.Operator.subcontractor_id == _sid(user)
+    if user.role == "operator":
+        return m.Operator.id == _oid(user)
+    return false()
+
+
+def operator_ratings(user: m.User) -> ColumnElement:
+    if user.is_staff:
+        return true()
+    if user.role == "operator":
+        return m.OperatorRating.operator_id == _oid(user)
+    return false()
+
+
+def operator_points(user: m.User) -> ColumnElement:
+    if user.is_staff:
+        return true()
+    if user.role == "operator":
+        return m.OperatorPointsEntry.operator_id == _oid(user)
+    return false()
 
 
 def acts(user: m.User) -> ColumnElement:
@@ -95,6 +127,16 @@ def acts(user: m.User) -> ColumnElement:
     if user.role == "client":
         return and_(m.BillingAct.kind == "client_avr", m.BillingAct.client_company_id == _cid(user))
     return and_(m.BillingAct.kind == "subcontractor_act", m.BillingAct.subcontractor_id == _sid(user))
+
+
+def can_rate_shift_report(user: m.User, report: "m.ShiftReport") -> bool:
+    """Кто может оценить смену 1–10: персонал — любую; клиент — только по своему объекту."""
+    if user.is_staff:
+        return True
+    if user.role != "client":
+        return False
+    obj = report.schedule.facility_object
+    return obj is not None and obj.client_company_id == _cid(user)
 
 
 def get_visible(db: Session, model: Type, pk, clause: ColumnElement):
